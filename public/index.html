@@ -1,0 +1,911 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ranked Reviews</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      background: #0d1117;
+      color: #e6edf3;
+      padding: 24px;
+      padding-bottom: 80px;
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    h1 { font-size: 24px; font-weight: 600; }
+
+    .controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+    .btn {
+      background: #21262d;
+      border: 1px solid #30363d;
+      color: #e6edf3;
+      padding: 6px 14px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      transition: background 0.15s;
+    }
+    .btn:hover { background: #30363d; }
+    .btn.active { background: #1f6feb; border-color: #1f6feb; }
+    .stats { font-size: 13px; color: #8b949e; margin-right: 4px; }
+
+    .calib-banner {
+      font-size: 12.5px;
+      color: #8b949e;
+      background: #161b22;
+      border: 1px solid #21262d;
+      border-radius: 8px;
+      padding: 9px 14px;
+      margin-bottom: 16px;
+      display: none;
+      line-height: 1.5;
+    }
+    .calib-banner.show { display: block; }
+    .calib-banner .ico { color: #3fb950; font-weight: 600; }
+    .calib-banner .ico.running { color: #58a6ff; }
+    .calib-banner .uncal { color: #d29922; }
+
+    .score.raw { opacity: 0.55; }
+    .raw-note { color: #8b949e; font-size: 11px; }
+
+    .load-more { text-align: center; color: #8b949e; font-size: 13px; padding: 16px 0 8px; }
+    .load-more .btn { margin-left: 6px; }
+
+    .log-pre {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+      line-height: 1.5;
+      color: #c9d1d9;
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 60vh;
+      overflow-y: auto;
+      background: #010409;
+      border: 1px solid #21262d;
+      border-radius: 6px;
+      padding: 12px;
+      margin: 0;
+    }
+
+    table { width: 100%; border-collapse: collapse; }
+
+    thead th {
+      text-align: left;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #8b949e;
+      font-weight: 600;
+      padding: 8px 10px;
+      border-bottom: 1px solid #30363d;
+      user-select: none;
+    }
+    thead th.sortable { cursor: pointer; }
+    thead th.sortable:hover { color: #e6edf3; }
+    thead th.num { text-align: center; width: 84px; }
+    th .arrow { font-size: 10px; color: #58a6ff; }
+
+    tbody tr {
+      border-bottom: 1px solid #21262d;
+      cursor: pointer;
+    }
+    tbody tr:hover { background: #161b22; }
+    tbody tr.selected { background: #1a2332; }
+    tbody tr.sleeping { opacity: 0.55; }
+
+    td { padding: 10px; vertical-align: top; }
+    td.center { text-align: center; vertical-align: middle; }
+
+    .pr-checkbox { width: 16px; height: 16px; accent-color: #1f6feb; cursor: pointer; }
+
+    .pr-title { color: #e6edf3; font-weight: 500; font-size: 14px; }
+    .pr-sub { font-size: 12px; color: #8b949e; margin-top: 3px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .pr-repo { color: #58a6ff; }
+    .gh-link { color: #8b949e; text-decoration: none; }
+    .gh-link:hover { color: #58a6ff; }
+
+    .badge { padding: 1px 6px; border-radius: 10px; font-size: 11px; font-weight: 500; }
+    .author-badge { background: rgba(139,148,158,0.18); color: #c9d1d9; }
+    .sleep-badge { background: rgba(210,153,34,0.2); color: #d29922; }
+    .label { padding: 1px 6px; border-radius: 10px; font-size: 11px; font-weight: 500; border: 1px solid transparent; }
+
+    .score {
+      display: inline-block;
+      min-width: 30px;
+      padding: 3px 8px;
+      border-radius: 6px;
+      font-weight: 600;
+      font-size: 14px;
+      font-variant-numeric: tabular-nums;
+    }
+    .score.s-high { background: rgba(63,185,80,0.18); color: #3fb950; }
+    .score.s-mid  { background: rgba(210,153,34,0.18); color: #d29922; }
+    .score.s-low  { background: rgba(248,81,73,0.18); color: #f85149; }
+
+    .pending { color: #8b949e; font-size: 12px; display: inline-flex; align-items: center; gap: 6px; }
+    .err { color: #f85149; font-size: 12px; cursor: help; }
+
+    .comment-count { color: #8b949e; font-size: 13px; font-variant-numeric: tabular-nums; }
+    .comment-count.has { color: #d29922; font-weight: 600; }
+
+    .spinner {
+      display: inline-block;
+      width: 13px; height: 13px;
+      border: 2px solid #30363d;
+      border-top-color: #58a6ff;
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+      vertical-align: middle;
+    }
+    .spinner.big { width: 22px; height: 22px; margin-bottom: 12px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .loading { text-align: center; padding: 60px 20px; color: #8b949e; font-size: 15px; }
+    .error-box { text-align: center; padding: 40px; color: #f85149; }
+
+    .action-bar {
+      position: fixed; bottom: 0; left: 0; right: 0;
+      background: #161b22; border-top: 1px solid #30363d;
+      padding: 12px 24px; display: flex; align-items: center; justify-content: center;
+      gap: 16px; z-index: 100; transform: translateY(100%); transition: transform 0.2s ease;
+    }
+    .action-bar.visible { transform: translateY(0); }
+    .action-bar .count { font-size: 14px; font-weight: 500; }
+    .sleep-btn { background: #d29922; border: none; color: #0d1117; padding: 8px 18px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; }
+    .sleep-btn:hover { background: #e3b341; }
+    .clear-btn { background: none; border: 1px solid #30363d; color: #8b949e; padding: 8px 14px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+    .clear-btn:hover { background: #21262d; color: #e6edf3; }
+
+    /* Detail modal */
+    .overlay {
+      position: fixed; inset: 0; background: rgba(1,4,9,0.7);
+      display: none; align-items: flex-start; justify-content: center;
+      padding: 40px 16px; z-index: 200; overflow-y: auto;
+    }
+    .overlay.visible { display: flex; }
+    .modal {
+      background: #0d1117; border: 1px solid #30363d; border-radius: 10px;
+      width: 100%; max-width: 820px; padding: 0;
+    }
+    .modal-head {
+      padding: 18px 20px; border-bottom: 1px solid #30363d;
+      display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;
+    }
+    .modal-title { font-size: 17px; font-weight: 600; }
+    .modal-sub { font-size: 13px; color: #8b949e; margin-top: 4px; }
+    .modal-sub a { color: #58a6ff; text-decoration: none; }
+    .close-x { background: none; border: none; color: #8b949e; font-size: 22px; cursor: pointer; line-height: 1; }
+    .close-x:hover { color: #e6edf3; }
+    .modal-body { padding: 20px; }
+
+    .score-row { display: flex; gap: 24px; margin-bottom: 18px; }
+    .score-block { display: flex; flex-direction: column; gap: 4px; }
+    .score-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: #8b949e; }
+
+    .summary { background: #161b22; border: 1px solid #21262d; border-radius: 8px; padding: 14px; font-size: 14px; line-height: 1.5; margin-bottom: 20px; }
+
+    .comments-head { font-size: 13px; font-weight: 600; color: #8b949e; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px; }
+    .file-group { margin-bottom: 16px; }
+    .file-name { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; color: #58a6ff; margin-bottom: 6px; }
+    .comment {
+      border: 1px solid #21262d; border-left: 3px solid #30363d; border-radius: 6px;
+      padding: 10px 12px; margin-bottom: 8px; background: #161b22;
+    }
+    .comment.sev-blocker { border-left-color: #f85149; }
+    .comment.sev-warning { border-left-color: #d29922; }
+    .comment.sev-nit { border-left-color: #58a6ff; }
+    .comment-meta { font-size: 12px; color: #8b949e; margin-bottom: 5px; display: flex; gap: 8px; align-items: center; }
+    .sev { padding: 1px 6px; border-radius: 10px; font-size: 10px; text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px; }
+    .sev-blocker .sev, .sev.blocker { background: rgba(248,81,73,0.2); color: #f85149; }
+    .sev-warning .sev, .sev.warning { background: rgba(210,153,34,0.2); color: #d29922; }
+    .sev-nit .sev, .sev.nit { background: rgba(88,166,255,0.2); color: #58a6ff; }
+    .comment-text { font-size: 14px; line-height: 1.5; }
+    .lineno { font-variant-numeric: tabular-nums; }
+    .empty-comments { color: #8b949e; font-size: 14px; }
+    .modal-err { color: #f85149; font-size: 13px; white-space: pre-wrap; font-family: ui-monospace, monospace; background: #161b22; border: 1px solid #21262d; border-radius: 6px; padding: 12px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Ranked Reviews</h1>
+    <div class="controls">
+      <span class="stats" id="stats"></span>
+      <button class="btn" id="calibrateBtn" title="Re-score all reviewed PRs so scores are comparable">Recalibrate</button>
+      <button class="btn" id="logsBtn" title="View the review activity log">Logs</button>
+      <button class="btn" id="sleepToggle">Sleeping</button>
+      <button class="btn" id="refreshBtn">Refresh</button>
+    </div>
+  </header>
+  <div id="calibBanner" class="calib-banner"></div>
+  <main id="app">
+    <div class="loading"><div class="spinner big"></div><div>Fetching PRs...</div></div>
+  </main>
+
+  <div class="action-bar" id="actionBar">
+    <span class="count" id="selCount"></span>
+    <button class="sleep-btn" id="sleepSelectedBtn">Sleep 1 week</button>
+    <button class="clear-btn" id="clearSelBtn">Clear</button>
+  </div>
+
+  <div class="overlay" id="overlay">
+    <div class="modal" id="modal"></div>
+  </div>
+
+  <div class="overlay" id="logOverlay">
+    <div class="modal">
+      <div class="modal-head">
+        <div>
+          <div class="modal-title">Activity log</div>
+          <div class="modal-sub" id="logStatus"></div>
+        </div>
+        <button class="close-x" id="logClose">&times;</button>
+      </div>
+      <div class="modal-body"><pre class="log-pre" id="logPre">Loading…</pre></div>
+    </div>
+  </div>
+
+  <script>
+    let allPRs = [];
+    let sleepData = {};
+    let reviewData = {};
+    let calibrationData = {};
+    let showSleeping = false;
+    let sortKey = "reviewable"; // risk | reviewable | updated
+    let sortDir = -1;           // -1 desc, 1 asc
+    let selected = new Set();
+    let lastClickedKey = null;
+    let renderedKeys = [];
+    let openKey = null;
+    const PAGE_SIZE = 50;
+    let visibleCount = PAGE_SIZE; // infinite-scroll window over the awake list
+    let prsFetchedAt = null;      // when the cached PR list was last refreshed
+
+    const app = document.getElementById("app");
+    const sleepToggle = document.getElementById("sleepToggle");
+    const refreshBtn = document.getElementById("refreshBtn");
+    const calibrateBtn = document.getElementById("calibrateBtn");
+    const calibBanner = document.getElementById("calibBanner");
+    const stats = document.getElementById("stats");
+    const actionBar = document.getElementById("actionBar");
+    const selCount = document.getElementById("selCount");
+    const sleepSelectedBtn = document.getElementById("sleepSelectedBtn");
+    const clearSelBtn = document.getElementById("clearSelBtn");
+    const overlay = document.getElementById("overlay");
+    const modal = document.getElementById("modal");
+    const logsBtn = document.getElementById("logsBtn");
+    const logOverlay = document.getElementById("logOverlay");
+    const logPre = document.getElementById("logPre");
+    const logStatus = document.getElementById("logStatus");
+    const logClose = document.getElementById("logClose");
+    let logTimer = null;
+
+    function prKey(pr) { return `${pr.repository.nameWithOwner}#${pr.number}`; }
+
+    function isSleeping(pr) {
+      const e = sleepData[prKey(pr)];
+      return e ? new Date(e.until).getTime() > Date.now() : false;
+    }
+
+    function sleepRemaining(pr) {
+      const e = sleepData[prKey(pr)];
+      if (!e) return "";
+      const ms = new Date(e.until).getTime() - Date.now();
+      if (ms <= 0) return "";
+      return `${Math.ceil(ms / (24 * 60 * 60 * 1000))}d left`;
+    }
+
+    function escapeHtml(text) {
+      const d = document.createElement("div");
+      d.textContent = text == null ? "" : text;
+      return d.innerHTML;
+    }
+
+    function timeAgo(dateStr) {
+      const s = Math.floor((Date.now() - new Date(dateStr)) / 1000);
+      if (s < 60) return "just now";
+      const m = Math.floor(s / 60);
+      if (m < 60) return `${m}m ago`;
+      const h = Math.floor(m / 60);
+      if (h < 24) return `${h}h ago`;
+      const d = Math.floor(h / 24);
+      if (d < 30) return `${d}d ago`;
+      return `${Math.floor(d / 30)}mo ago`;
+    }
+
+    function getLabelStyle(label) {
+      const hex = label.color || "8b949e";
+      const r = parseInt(hex.slice(0, 2), 16);
+      const g = parseInt(hex.slice(2, 4), 16);
+      const b = parseInt(hex.slice(4, 6), 16);
+      return `background: rgba(${r},${g},${b},0.2); color: #${hex}; border-color: rgba(${r},${g},${b},0.4);`;
+    }
+
+    // Higher risk / more comments to make = more alarming (red); low = calm (green).
+    function scoreClass(n) { return n >= 70 ? "s-low" : n >= 40 ? "s-mid" : "s-high"; }
+
+    // Effective (calibrated-if-available) and raw score for a review row.
+    function effScore(r, field) {
+      const calField = field === "risk" ? "calibratedRisk" : "calibratedReviewable";
+      const cal = r[calField];
+      return cal != null ? cal : r[field];
+    }
+
+    // Render a score cell based on the PR's review status.
+    function scoreCell(key, field) {
+      const r = reviewData[key];
+      if (!r || r.status === "unprocessed") return '<span class="pending">—</span>';
+      if (r.status === "queued") return '<span class="pending">queued</span>';
+      if (r.status === "processing") return '<span class="pending"><span class="spinner"></span> reviewing</span>';
+      if (r.status === "error") return '<span class="err" title="Review failed — click row for details">error</span>';
+      const v = effScore(r, field);
+      if (v == null) return '<span class="pending">—</span>';
+      const title = r.isCalibrated ? `calibrated (raw ${r[field]})` : "not yet calibrated";
+      return `<span class="score ${scoreClass(v)}" title="${title}">${v}</span>`;
+    }
+
+    function commentCell(key) {
+      const r = reviewData[key];
+      if (!r || r.status !== "done") return '<span class="comment-count">—</span>';
+      const n = r.commentCount;
+      if (n == null) return '<span class="comment-count">—</span>';
+      return `<span class="comment-count ${n > 0 ? "has" : ""}">${n}</span>`;
+    }
+
+    // Sort value: PRs with no score yet sink to the bottom regardless of dir.
+    function sortValue(pr) {
+      if (sortKey === "updated") return new Date(pr.updatedAt).getTime();
+      const r = reviewData[prKey(pr)];
+      const v = r && r.status === "done" ? effScore(r, sortKey) : null;
+      return v == null ? null : v;
+    }
+
+    function updateActionBar() {
+      const count = selected.size;
+      actionBar.classList.toggle("visible", count > 0);
+      selCount.textContent = `${count} PR${count === 1 ? "" : "s"} selected`;
+    }
+
+    function toggleSelect(key, e) {
+      if (e.shiftKey && lastClickedKey && lastClickedKey !== key) {
+        const a = renderedKeys.indexOf(lastClickedKey);
+        const b = renderedKeys.indexOf(key);
+        if (a !== -1 && b !== -1) {
+          for (let i = Math.min(a, b); i <= Math.max(a, b); i++) selected.add(renderedKeys[i]);
+        }
+      } else if (selected.has(key)) {
+        selected.delete(key);
+      } else {
+        selected.add(key);
+      }
+      lastClickedKey = key;
+      updateActionBar();
+      render();
+    }
+
+    function renderRow(pr, inSleepSection) {
+      const key = prKey(pr);
+      const author = pr.author ? pr.author.login : "unknown";
+      const sleeping = isSleeping(pr);
+      const labels = (pr.labels || [])
+        .map((l) => `<span class="label" style="${getLabelStyle(l)}">${escapeHtml(l.name)}</span>`)
+        .join("");
+
+      return `
+        <tr class="${selected.has(key) ? "selected" : ""} ${sleeping ? "sleeping" : ""}"
+            data-key="${key}" data-action="open">
+          <td class="center" data-action="check">
+            <input type="checkbox" class="pr-checkbox" ${selected.has(key) ? "checked" : ""}>
+          </td>
+          <td>
+            <div class="pr-title">${escapeHtml(pr.title)}</div>
+            <div class="pr-sub">
+              <span class="pr-repo">${escapeHtml(pr.repository.nameWithOwner)}</span>
+              <a class="gh-link" href="${pr.url}" target="_blank" data-action="ghlink">#${pr.number} &#8599;</a>
+              <span class="badge author-badge">@${escapeHtml(author)}</span>
+              ${sleeping ? `<span class="badge sleep-badge">Sleeping ${sleepRemaining(pr)}</span>` : ""}
+              ${labels}
+            </div>
+          </td>
+          <td class="center">${scoreCell(key, "risk")}</td>
+          <td class="center">${scoreCell(key, "reviewable")}</td>
+          <td class="center">${commentCell(key)}</td>
+          <td class="center"><span class="comment-count">${timeAgo(pr.updatedAt)}</span></td>
+          ${inSleepSection ? `<td class="center"><button class="clear-btn" data-action="wake">Wake</button></td>` : "<td></td>"}
+        </tr>`;
+    }
+
+    // Primary sort tier by review status so already-reviewed and currently-
+    // reviewing PRs stay at the top (no scrolling past unprocessed ones).
+    function statusRank(pr) {
+      const r = reviewData[prKey(pr)];
+      const s = r ? r.status : "unprocessed";
+      if (s === "done") return 0;
+      if (s === "processing") return 1;
+      if (s === "queued") return 2;
+      if (s === "error") return 3;
+      return 4;
+    }
+
+    function sortPRs(prs) {
+      return [...prs].sort((a, b) => {
+        const ra = statusRank(a);
+        const rb = statusRank(b);
+        if (ra !== rb) return ra - rb;
+
+        // Within a tier, apply the chosen sort; nulls fall to the tier's end.
+        const va = sortValue(a);
+        const vb = sortValue(b);
+        if (va == null && vb == null) return new Date(b.updatedAt) - new Date(a.updatedAt);
+        if (va == null) return 1;
+        if (vb == null) return -1;
+        if (va === vb) return new Date(b.updatedAt) - new Date(a.updatedAt);
+        return (va - vb) * sortDir;
+      });
+    }
+
+    function arrow(key) {
+      return sortKey === key ? `<span class="arrow">${sortDir === -1 ? "▼" : "▲"}</span>` : "";
+    }
+
+    function renderCalibBanner() {
+      const c = calibrationData || {};
+      const done = Object.values(reviewData).filter((r) => r.status === "done");
+      const uncal = done.filter((r) => !r.isCalibrated).length;
+      let html = "";
+
+      if (c.running) {
+        html = `<span class="spinner"></span> Calibrating scores across ${done.length} reviewed PRs…`;
+      } else if (c.calibratedAt) {
+        html = `<span class="ico">✓</span> Scores calibrated across ${c.count} PRs ${timeAgo(c.calibratedAt)}.`;
+        if (c.note) html += ` ${escapeHtml(c.note)}`;
+        if (uncal > 0) html += ` <span class="uncal">${uncal} newer review${uncal === 1 ? "" : "s"} awaiting calibration.</span>`;
+      } else if (done.length >= 2) {
+        html = `<span class="uncal">Scores not yet calibrated.</span> Scores shown are raw per-PR estimates — click “Recalibrate” to make them comparable.`;
+      } else {
+        calibBanner.classList.remove("show");
+        return;
+      }
+
+      calibBanner.innerHTML = html;
+      calibBanner.classList.add("show");
+    }
+
+    function render() {
+      const scrollY = window.scrollY; // preserve scroll across re-render (polling)
+      const awake = allPRs.filter((pr) => !isSleeping(pr));
+      const sleeping = allPRs.filter((pr) => isSleeping(pr));
+      const sortedAwake = sortPRs(awake);
+
+      // Infinite-scroll window: only render the first `visibleCount` awake rows.
+      visibleCount = Math.min(Math.max(visibleCount, PAGE_SIZE), Math.max(sortedAwake.length, PAGE_SIZE));
+      const visibleAwake = sortedAwake.slice(0, visibleCount);
+      const hasMore = sortedAwake.length > visibleAwake.length;
+
+      renderedKeys = visibleAwake.map(prKey);
+      if (showSleeping) renderedKeys = renderedKeys.concat(sleeping.map(prKey));
+
+      const doneCount = Object.values(reviewData).filter((r) => r.status === "done").length;
+      const updated = prsFetchedAt ? ` · updated ${timeAgo(prsFetchedAt)}` : "";
+      stats.textContent = `${awake.length} PRs · ${doneCount} reviewed · ${sleeping.length} sleeping${updated}`;
+      renderCalibBanner();
+
+      if (awake.length === 0 && (!showSleeping || sleeping.length === 0)) {
+        app.innerHTML = '<div class="loading">No PRs currently need your review.</div>';
+        return;
+      }
+
+      const head = `
+        <thead><tr>
+          <th></th>
+          <th>Pull request</th>
+          <th class="num sortable" data-sort="risk">Risk ${arrow("risk")}</th>
+          <th class="num sortable" data-sort="reviewable">Reviewable ${arrow("reviewable")}</th>
+          <th class="num">Comments</th>
+          <th class="num sortable" data-sort="updated">Updated ${arrow("updated")}</th>
+          <th></th>
+        </tr></thead>`;
+
+      let html = `<table>${head}<tbody>`;
+      html += visibleAwake.map((pr) => renderRow(pr, false)).join("");
+      html += "</tbody></table>";
+
+      if (hasMore) {
+        html += `<div class="load-more" id="loadMore">
+          Showing ${visibleAwake.length} of ${sortedAwake.length} · <button class="btn" id="loadMoreBtn">Load more</button>
+        </div>`;
+      }
+
+      if (showSleeping && sleeping.length > 0) {
+        html += '<div class="comments-head" style="margin:28px 0 12px;">Sleeping</div>';
+        html += `<table><tbody>${sleeping.map((pr) => renderRow(pr, true)).join("")}</tbody></table>`;
+      }
+
+      app.innerHTML = html;
+      window.scrollTo(0, scrollY); // keep position stable through polled re-renders
+    }
+
+    // Grow the visible window; called by the scroll observer and the button.
+    function showMore() {
+      const awakeTotal = allPRs.filter((pr) => !isSleeping(pr)).length;
+      if (visibleCount >= awakeTotal) return;
+      visibleCount += PAGE_SIZE;
+      render();
+    }
+
+    // ---- Detail modal -------------------------------------------------------
+    function findPR(key) { return allPRs.find((pr) => prKey(pr) === key); }
+
+    async function openDetail(key) {
+      openKey = key;
+      const pr = findPR(key);
+      overlay.classList.add("visible");
+      modal.innerHTML = '<div class="modal-body"><div class="loading"><div class="spinner big"></div><div>Loading review...</div></div></div>';
+
+      let r;
+      try {
+        r = await (await fetch(`/api/reviews/${encodeURIComponent(key)}`)).json();
+      } catch {
+        r = { status: "error", error: "Failed to load review." };
+      }
+      if (openKey !== key) return; // user moved on
+      renderDetail(key, pr, r);
+    }
+
+    function renderDetail(key, pr, r) {
+      const title = pr ? escapeHtml(pr.title) : key;
+      const url = pr ? pr.url : `https://github.com/${key.replace("#", "/pull/")}`;
+      const repo = pr ? pr.repository.nameWithOwner : key.split("#")[0];
+
+      let body = "";
+      if (!r || r.status === "unprocessed" || r.status === "queued") {
+        body = '<div class="loading"><div class="spinner big"></div><div>Queued for review…</div></div>';
+      } else if (r.status === "processing") {
+        body = '<div class="loading"><div class="spinner big"></div><div>Reviewing this PR with claude…</div></div>';
+      } else if (r.status === "error") {
+        body = `<div class="modal-err">Review failed:\n\n${escapeHtml(r.error || "unknown error")}</div>`;
+      } else {
+        const cal = r.calibrated || {};
+        const risk = cal.risk != null ? cal.risk : (r.risk ?? "—");
+        const reviewable = cal.reviewable != null ? cal.reviewable : (r.reviewable ?? "—");
+        const calibrated = cal.risk != null || cal.reviewable != null;
+        const sc = (v) => (typeof v === "number" ? `score ${scoreClass(v)}` : "pending");
+        const rawNote = (field) =>
+          calibrated && r[field] != null && cal[field] != null && cal[field] !== r[field]
+            ? `<span class="raw-note">raw ${r[field]}</span>`
+            : "";
+
+        const groups = new Map();
+        for (const c of r.comments || []) {
+          if (!groups.has(c.file)) groups.set(c.file, []);
+          groups.get(c.file).push(c);
+        }
+
+        let commentsHtml;
+        if (!r.comments || r.comments.length === 0) {
+          commentsHtml = '<div class="empty-comments">No suggested comments — this PR looks clean.</div>';
+        } else {
+          commentsHtml = [...groups.entries()].map(([file, cs]) => `
+            <div class="file-group">
+              <div class="file-name">${escapeHtml(file || "(unknown file)")}</div>
+              ${cs.map((c) => `
+                <div class="comment sev-${c.severity}">
+                  <div class="comment-meta">
+                    <span class="sev ${c.severity}">${c.severity}</span>
+                    ${c.line != null ? `<span class="lineno">line ${c.line}</span>` : ""}
+                  </div>
+                  <div class="comment-text">${escapeHtml(c.comment)}</div>
+                </div>`).join("")}
+            </div>`).join("");
+        }
+
+        body = `
+          <div class="score-row">
+            <div class="score-block">
+              <span class="score-label">Risk${calibrated ? " (calibrated)" : ""}</span>
+              <span class="${sc(risk)}" style="font-size:18px;">${risk}</span>
+              ${rawNote("risk")}
+            </div>
+            <div class="score-block">
+              <span class="score-label">Reviewable${calibrated ? " (calibrated)" : ""}</span>
+              <span class="${sc(reviewable)}" style="font-size:18px;">${reviewable}</span>
+              ${rawNote("reviewable")}
+            </div>
+            <div class="score-block">
+              <span class="score-label">Reviewed</span>
+              <span class="comment-count" style="font-size:14px;">${r.reviewedAt ? timeAgo(r.reviewedAt) : "—"}</span>
+            </div>
+          </div>
+          ${calibrated && cal.reason ? `<div class="raw-note" style="margin-bottom:14px;">Calibration: ${escapeHtml(cal.reason)}</div>` : ""}
+          ${r.summary ? `<div class="summary">${escapeHtml(r.summary)}</div>` : ""}
+          <div class="comments-head">Suggested comments${r.comments ? ` (${r.comments.length})` : ""}</div>
+          ${commentsHtml}`;
+      }
+
+      modal.innerHTML = `
+        <div class="modal-head">
+          <div>
+            <div class="modal-title">${title}</div>
+            <div class="modal-sub">
+              ${escapeHtml(repo)} ·
+              <a href="${url}" target="_blank">View on GitHub &#8599;</a>
+            </div>
+          </div>
+          <div style="display:flex; gap:10px; align-items:center;">
+            <button class="btn" data-action="rereview">Re-review</button>
+            <button class="close-x" data-action="close">&times;</button>
+          </div>
+        </div>
+        <div class="modal-body">${body}</div>`;
+    }
+
+    function closeDetail() {
+      openKey = null;
+      overlay.classList.remove("visible");
+    }
+
+    async function rereview(key) {
+      await fetch(`/api/reviews/${encodeURIComponent(key)}/refresh`, { method: "POST" });
+      reviewData[key] = { status: "queued" };
+      render();
+      openDetail(key);
+    }
+
+    // ---- Data ---------------------------------------------------------------
+    async function loadPrs(query = "") {
+      const res = await fetch("/api/prs" + query);
+      if (!res.ok) throw new Error("Failed to fetch PRs");
+      const data = await res.json();
+      allPRs = data.prs || [];
+      prsFetchedAt = data.fetchedAt || null;
+      return data;
+    }
+
+    // After a background revalidation is kicked off, poll the (instant) cache
+    // until the server publishes a newer snapshot, then swap it in.
+    function watchForFreshPrs(prevFetchedAt) {
+      return new Promise((resolve) => {
+        let tries = 0;
+        const iv = setInterval(async () => {
+          tries += 1;
+          try {
+            const data = await loadPrs();
+            if (data.fetchedAt && data.fetchedAt !== prevFetchedAt) {
+              render();
+              clearInterval(iv);
+              resolve(true);
+              return;
+            }
+          } catch {
+            // keep trying
+          }
+          if (tries >= 30) {
+            clearInterval(iv);
+            resolve(false);
+          }
+        }, 2000);
+      });
+    }
+
+    async function fetchPRs() {
+      app.innerHTML = '<div class="loading"><div class="spinner big"></div><div>Fetching PRs...</div></div>';
+      try {
+        const [prData, sleepRes, reviewRes] = await Promise.all([
+          loadPrs(),
+          fetch("/api/sleep").then((r) => r.json()),
+          fetch("/api/reviews").then((r) => r.json()),
+        ]);
+        sleepData = sleepRes;
+        reviewData = reviewRes.reviews || {};
+        calibrationData = reviewRes.calibration || {};
+        selected.clear();
+        visibleCount = PAGE_SIZE;
+        updateActionBar();
+        render();
+        // Cache was stale → server is revalidating in the background; pick it up.
+        if (prData.stale) watchForFreshPrs(prData.fetchedAt);
+      } catch (e) {
+        app.innerHTML = '<div class="error-box">Failed to load PRs. Check that `gh` is installed and authenticated.</div>';
+      }
+    }
+
+    // Manual refresh: instantly re-render from cache, force a background
+    // revalidation, then swap in the fresh snapshot when it's ready.
+    async function manualRefresh() {
+      if (refreshBtn.disabled) return;
+      refreshBtn.disabled = true;
+      refreshBtn.textContent = "Refreshing…";
+      try {
+        const prev = prsFetchedAt;
+        await loadPrs("?revalidate=1");
+        render();
+        await watchForFreshPrs(prev);
+      } catch {
+        // leave the existing view in place
+      } finally {
+        refreshBtn.disabled = false;
+        refreshBtn.textContent = "Refresh";
+      }
+    }
+
+    // Poll review progress so scores appear as PRs finish processing.
+    async function pollReviews() {
+      try {
+        const data = await (await fetch("/api/reviews")).json();
+        reviewData = data.reviews || {};
+        calibrationData = data.calibration || {};
+        if (allPRs.length) render();
+        if (openKey) {
+          const cur = reviewData[openKey];
+          // Refresh the open modal when its review just finished.
+          if (cur && (cur.status === "done" || cur.status === "error")) {
+            const r = await (await fetch(`/api/reviews/${encodeURIComponent(openKey)}`)).json();
+            if (openKey) renderDetail(openKey, findPR(openKey), r);
+          }
+        }
+      } catch {
+        // transient; try again next tick
+      }
+    }
+
+    async function sleepPRs(keys, days) {
+      const res = await fetch("/api/sleep", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ keys, days }),
+      });
+      sleepData = await res.json();
+      selected.clear();
+      updateActionBar();
+      render();
+    }
+
+    async function wakePR(key) {
+      const res = await fetch(`/api/sleep/${encodeURIComponent(key)}`, { method: "DELETE" });
+      sleepData = await res.json();
+      render();
+    }
+
+    // ---- Events -------------------------------------------------------------
+    app.addEventListener("click", (e) => {
+      if (e.target.closest("#loadMoreBtn")) { showMore(); return; }
+
+      const row = e.target.closest("tr[data-key]");
+      if (!row) {
+        const th = e.target.closest("th[data-sort]");
+        if (th) {
+          const key = th.dataset.sort;
+          if (sortKey === key) sortDir = -sortDir;
+          else { sortKey = key; sortDir = key === "updated" ? -1 : -1; }
+          visibleCount = PAGE_SIZE; // re-rank from the top
+          window.scrollTo(0, 0);
+          render();
+        }
+        return;
+      }
+
+      const key = row.dataset.key;
+      const action = e.target.closest("[data-action]")?.dataset.action;
+
+      if (action === "ghlink") return;            // let the link open
+      if (action === "wake") { wakePR(key); return; }
+
+      // Cmd/Ctrl-click (or middle-click) opens the PR on GitHub in a new tab.
+      if (e.metaKey || e.ctrlKey) {
+        const pr = findPR(key);
+        if (pr) window.open(pr.url, "_blank");
+        return;
+      }
+
+      if (action === "check" || e.target.classList.contains("pr-checkbox")) {
+        toggleSelect(key, e);
+        return;
+      }
+      openDetail(key);
+    });
+
+    // Middle-click a row opens the PR in a new tab.
+    app.addEventListener("auxclick", (e) => {
+      if (e.button !== 1) return;
+      const row = e.target.closest("tr[data-key]");
+      if (!row || e.target.closest("a")) return;
+      const pr = findPR(row.dataset.key);
+      if (pr) window.open(pr.url, "_blank");
+    });
+
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) { closeDetail(); return; }
+      const action = e.target.closest("[data-action]")?.dataset.action;
+      if (action === "close") closeDetail();
+      if (action === "rereview" && openKey) rereview(openKey);
+    });
+
+    document.addEventListener("keydown", (e) => {
+      if (e.key !== "Escape") return;
+      if (logOverlay.classList.contains("visible")) closeLogs();
+      else if (openKey) closeDetail();
+    });
+
+    sleepToggle.addEventListener("click", () => {
+      showSleeping = !showSleeping;
+      sleepToggle.classList.toggle("active", showSleeping);
+      render();
+    });
+
+    // Infinite scroll: grow the window as the user nears the bottom.
+    window.addEventListener("scroll", () => {
+      if (openKey) return;
+      const nearBottom = window.scrollY + window.innerHeight >= document.body.offsetHeight - 400;
+      if (nearBottom) showMore();
+    }, { passive: true });
+
+    refreshBtn.addEventListener("click", manualRefresh);
+
+    async function loadLog() {
+      try {
+        const data = await (await fetch("/api/log?n=400")).json();
+        const atBottom = logPre.scrollTop + logPre.clientHeight >= logPre.scrollHeight - 20;
+        logPre.textContent = (data.lines || []).join("\n") || "(log is empty)";
+        if (atBottom) logPre.scrollTop = logPre.scrollHeight;
+        logStatus.textContent = `${data.inFlight} review${data.inFlight === 1 ? "" : "s"} in flight${data.calibrating ? " · calibrating" : ""}`;
+      } catch {
+        logPre.textContent = "Failed to load log.";
+      }
+    }
+
+    function openLogs() {
+      logOverlay.classList.add("visible");
+      loadLog();
+      logPre.scrollTop = logPre.scrollHeight;
+      logTimer = setInterval(loadLog, 2000);
+    }
+
+    function closeLogs() {
+      logOverlay.classList.remove("visible");
+      if (logTimer) { clearInterval(logTimer); logTimer = null; }
+    }
+
+    logsBtn.addEventListener("click", openLogs);
+    logClose.addEventListener("click", closeLogs);
+    logOverlay.addEventListener("click", (e) => { if (e.target === logOverlay) closeLogs(); });
+
+    calibrateBtn.addEventListener("click", async () => {
+      try {
+        await fetch("/api/calibrate", { method: "POST" });
+        calibrationData = { ...calibrationData, running: true };
+        renderCalibBanner();
+        setTimeout(pollReviews, 500);
+      } catch {
+        // ignore; banner stays as-is
+      }
+    });
+
+    sleepSelectedBtn.addEventListener("click", () => {
+      if (selected.size) sleepPRs([...selected], 7);
+    });
+
+    clearSelBtn.addEventListener("click", () => {
+      selected.clear();
+      updateActionBar();
+      render();
+    });
+
+    fetchPRs();
+    setInterval(pollReviews, 4000);
+  </script>
+</body>
+</html>

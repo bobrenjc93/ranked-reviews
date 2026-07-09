@@ -1,0 +1,13 @@
+{
+  "name": "ranked-reviews",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Rank the PRs you're asked to review by AI-generated usefulness and quality scores, with suggested inline comments.",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch --watch-path=server.js --watch-path=lib --watch-path=public server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0"
+  }
+}

@@ -1,0 +1,9 @@
+node_modules/
+reviews.json
+calibration.json
+prs.json
+sleep.json
+ranked-reviews.log
+*.bak
+*.bak-*
+.DS_Store
