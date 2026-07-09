@@ -3,7 +3,7 @@ const { execFile } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 const { Semaphore } = require("./lib/semaphore");
-const { reviewPR, resolveModel, modelDisplay, REVIEW_MODEL, REVIEW_EFFORT } = require("./lib/reviewer");
+const { reviewPR, modelDisplay, REVIEW_MODEL, REVIEW_EFFORT } = require("./lib/reviewer");
 const { calibrate } = require("./lib/calibrate");
 const { log, tail } = require("./lib/log");
 const { killAll } = require("./lib/procs");
@@ -532,13 +532,9 @@ app.get("/api/log", (req, res) => {
   res.json({ lines: tail(n), inFlight: inFlight.size, calibrating: calibrationRunning });
 });
 
-const server = app.listen(PORT, async () => {
+const server = app.listen(PORT, () => {
   log(`server running at http://localhost:${PORT}`);
-
-  // Resolve the model version up front so review log lines show it (e.g.
-  // "opus 4.8" rather than the "opus" alias). Best-effort; falls back to alias.
-  const model = await resolveModel();
-  log(`reviewing with claude "${model}" (effort ${REVIEW_EFFORT}), ${REVIEW_CONCURRENCY} at a time`);
+  log(`reviewing with claude "${modelDisplay()}" (effort ${REVIEW_EFFORT}), ${REVIEW_CONCURRENCY} at a time`);
 
   // Auto-resume: re-enqueue cached PRs so reviews pick back up after a restart
   // without waiting for the browser to hit /api/prs again.
