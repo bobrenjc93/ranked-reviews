@@ -4,9 +4,10 @@ A local app that ranks the GitHub pull requests you've been asked to review by
 **AI-generated scores**, and shows **suggested inline comments** when you open a PR.
 
 It's a descendant of [theirprs](https://github.com/bobrenjc93/theirprs): same set
-of PRs (open, review requested from `@me`, not your own, not a draft, not already
-approved / changes-requested), but instead of a flat list you get a sortable
-table driven by an automated review.
+of PRs (open, review requested from `@me`, not your own, not a draft, and not ones
+you've already reviewed — approved or requested changes — unless your review was
+re-requested), but instead of a flat list you get a sortable table driven by an
+automated review.
 
 For each PR, `ranked-reviews` checks the PR out into a git worktree and runs
 `claude -p` over it to produce:
@@ -112,6 +113,7 @@ Environment variables:
 | --- | --- | --- |
 | `PORT` | `3002` | HTTP port |
 | `PRS_TTL_MS` | `60000` | How long the cached PR list is considered fresh before background revalidation |
+| `PRS_REFRESH_INTERVAL_MS` | `3600000` | How often the server re-fetches the PR list from GitHub (hourly) |
 | `REVIEW_CONCURRENCY` | `3` | Max reviews running at once (the semaphore) |
 | `REVIEW_MODEL` | `opus` | Model passed to `claude --model` (resolves to Opus 4.8) |
 | `REVIEW_EFFORT` | `xhigh` | Reasoning effort passed to `claude --effort` (low/medium/high/xhigh/max) |
@@ -143,3 +145,7 @@ REVIEW_CONCURRENCY=5 REVIEW_MODEL=opus npm start
   load (and refresh) instantly from cache while the slow `gh` calls run in the
   background, after which the fresh snapshot is swapped in automatically. Set
   `PRS_TTL_MS` to control how long the cache is considered fresh.
+- The list also refreshes on a fixed interval — hourly by default, set by
+  `PRS_REFRESH_INTERVAL_MS` (both server-side, so reviews stay current with no
+  browser open, and client-side, so an open tab drops PRs you've reviewed and
+  picks up new ones). The header shows when the list was last updated.

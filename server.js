@@ -13,6 +13,7 @@ const PORT = Number(process.env.PORT || 3002);
 const REVIEW_CONCURRENCY = Number(process.env.REVIEW_CONCURRENCY || 3);
 const MEMORY_SAMPLE_SIZE = Number(process.env.REVIEW_MEMORY_SAMPLE || 25);
 const PRS_TTL_MS = Number(process.env.PRS_TTL_MS || 60_000);
+const PRS_REFRESH_INTERVAL_MS = Number(process.env.PRS_REFRESH_INTERVAL_MS || 60 * 60 * 1000);
 const SLEEP_FILE = path.join(__dirname, "sleep.json");
 const REVIEWS_FILE = path.join(__dirname, "reviews.json");
 const CALIBRATION_FILE = path.join(__dirname, "calibration.json");
@@ -305,7 +306,7 @@ let prsRefreshing = false;
 
 // The slow part: hit GitHub via `gh` for the PRs needing review.
 async function fetchPrsFromGh() {
-  const [viewerLogin, prs] = await Promise.all([
+  const [viewerLoginRaw, prs] = await Promise.all([
     execGhText(["api", "user", "--jq", ".login"]),
     execGhJson([
       "search",
@@ -317,6 +318,8 @@ async function fetchPrsFromGh() {
       "number,title,repository,updatedAt,url,isDraft,state,createdAt,labels,author,body",
     ]),
   ]);
+
+  const viewerLogin = (viewerLoginRaw || "").toLowerCase();
 
   const byRepo = new Map();
   for (const pr of prs) {
@@ -340,7 +343,7 @@ async function fetchPrsFromGh() {
           "--limit",
           "200",
           "--json",
-          "number,reviewDecision,headRefOid",
+          "number,reviewDecision,headRefOid,latestReviews,reviewRequests",
         ]);
 
         const byNumber = new Map(details.map((d) => [d.number, d]));
@@ -348,19 +351,37 @@ async function fetchPrsFromGh() {
           const d = byNumber.get(pr.number) || {};
           pr.reviewDecision = d.reviewDecision || "";
           pr.headSha = d.headRefOid || "";
+          pr.latestReviews = d.latestReviews || [];
+          pr.reviewRequests = d.reviewRequests || [];
         }
       } catch {
         for (const pr of repoPrs) {
           pr.reviewDecision = "";
           pr.headSha = "";
+          pr.latestReviews = [];
+          pr.reviewRequests = [];
         }
       }
     })
   );
 
   return prs.filter((pr) => {
-    if (!pr.author || pr.author.login === viewerLogin || pr.isDraft) return false;
-    return pr.reviewDecision !== "APPROVED" && pr.reviewDecision !== "CHANGES_REQUESTED";
+    if (!pr.author || pr.author.login.toLowerCase() === viewerLogin || pr.isDraft) return false;
+
+    // Drop PRs you've already acted on — where YOUR latest review is an approval
+    // or a changes-request — unless your review has since been re-requested (you
+    // are individually back in the review-request list). This is based on your
+    // own review, not the PR's overall decision, so PRs approved by others that
+    // still need your review stay on the list.
+    const reRequested = (pr.reviewRequests || []).some(
+      (r) => (r.login || "").toLowerCase() === viewerLogin
+    );
+    const myReview = (pr.latestReviews || []).find(
+      (r) => r.author && (r.author.login || "").toLowerCase() === viewerLogin
+    );
+    const alreadyReviewed =
+      myReview && (myReview.state === "APPROVED" || myReview.state === "CHANGES_REQUESTED");
+    return !(alreadyReviewed && !reRequested);
   });
 }
 
@@ -382,10 +403,11 @@ async function refreshPrs() {
   }
 }
 
-// Strip the heavy `body` field (only needed server-side for the review prompt)
-// before sending the list to the browser.
+// Strip fields only needed server-side (the heavy `body` used for the review
+// prompt, and the review metadata used for filtering) before sending to the
+// browser.
 function clientPrs(data) {
-  return data.map(({ body, ...pr }) => pr);
+  return data.map(({ body, latestReviews, reviewRequests, ...pr }) => pr);
 }
 
 // ---------------------------------------------------------------------------
@@ -542,6 +564,13 @@ const server = app.listen(PORT, () => {
     for (const pr of prsCache.data) enqueueReview(pr);
     log(`auto-resume: enqueued ${inFlight.size} reviews from cached PR list`);
   }
+
+  // Refresh the PR list from GitHub on a fixed interval (hourly by default) so
+  // newly-opened PRs get queued and ones you've reviewed / that closed drop off,
+  // even when no browser is polling.
+  setInterval(() => {
+    refreshPrs().catch((e) => console.error("Scheduled PR refresh failed:", e.message));
+  }, PRS_REFRESH_INTERVAL_MS).unref();
 });
 
 // Graceful shutdown (e.g. `node --watch` restart on file edit, or Ctrl-C):

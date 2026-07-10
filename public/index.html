@@ -43,6 +43,7 @@
     .btn:hover { background: #30363d; }
     .btn.active { background: #1f6feb; border-color: #1f6feb; }
     .stats { font-size: 13px; color: #8b949e; margin-right: 4px; }
+    .updated { font-size: 12.5px; color: #8b949e; margin-right: 4px; }
 
     .calib-banner {
       font-size: 12.5px;
@@ -225,6 +226,7 @@
     <h1>Ranked Reviews</h1>
     <div class="controls">
       <span class="stats" id="stats"></span>
+      <span class="updated" id="updated" title="When the PR list was last refreshed from GitHub"></span>
       <button class="btn" id="calibrateBtn" title="Re-score all reviewed PRs so scores are comparable">Recalibrate</button>
       <button class="btn" id="logsBtn" title="View the review activity log">Logs</button>
       <button class="btn" id="sleepToggle">Sleeping</button>
@@ -281,6 +283,7 @@
     const calibrateBtn = document.getElementById("calibrateBtn");
     const calibBanner = document.getElementById("calibBanner");
     const stats = document.getElementById("stats");
+    const updatedEl = document.getElementById("updated");
     const actionBar = document.getElementById("actionBar");
     const selCount = document.getElementById("selCount");
     const sleepSelectedBtn = document.getElementById("sleepSelectedBtn");
@@ -500,8 +503,8 @@
       if (showSleeping) renderedKeys = renderedKeys.concat(sleeping.map(prKey));
 
       const doneCount = Object.values(reviewData).filter((r) => r.status === "done").length;
-      const updated = prsFetchedAt ? ` · updated ${timeAgo(prsFetchedAt)}` : "";
-      stats.textContent = `${awake.length} PRs · ${doneCount} reviewed · ${sleeping.length} sleeping${updated}`;
+      stats.textContent = `${awake.length} PRs · ${doneCount} reviewed · ${sleeping.length} sleeping`;
+      updatedEl.textContent = prsFetchedAt ? `Updated ${timeAgo(prsFetchedAt)}` : "";
       renderCalibBanner();
 
       if (awake.length === 0 && (!showSleeping || sleeping.length === 0)) {
@@ -906,6 +909,9 @@
 
     fetchPRs();
     setInterval(pollReviews, 4000);
+    // Auto-refresh the PR list hourly so PRs you've reviewed (or that closed)
+    // drop off and newly-requested ones appear without a manual reload.
+    setInterval(manualRefresh, 60 * 60 * 1000);
   </script>
 </body>
 </html>
