@@ -19,7 +19,10 @@ For each PR, `ranked-reviews` checks the PR out into a git worktree and runs
   (bugs, missing tests, poor naming, edge cases); 0 for a perfect PR with
   nothing to comment on.
 - **Suggested comments** — a list of actionable review notes, each with a file
-  name and line number.
+  name, line number, and a severity of **blocking** (must fix before merge),
+  **warning**, or **nit**. PRs with any blocking comments are sorted to the very
+  top of the **Reviewable** view (then by number of blockers), so the most
+  important reviews surface first.
 
 The two scores show up in the main table. The comments show up when you click a
 PR open — each has a **Copy** button, and a **Comment** button that posts it to

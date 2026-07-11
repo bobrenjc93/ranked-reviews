@@ -143,6 +143,8 @@
 
     .comment-count { color: #8b949e; font-size: 13px; font-variant-numeric: tabular-nums; }
     .comment-count.has { color: #d29922; font-weight: 600; }
+    .comment-count.blocking { color: #f85149; font-weight: 600; }
+    .blk-badge { color: #f85149; font-weight: 600; font-size: 11px; margin-left: 4px; }
 
     .spinner {
       display: inline-block;
@@ -207,12 +209,12 @@
       border: 1px solid #21262d; border-left: 3px solid #30363d; border-radius: 6px;
       padding: 10px 12px; margin-bottom: 8px; background: #161b22;
     }
-    .comment.sev-blocker { border-left-color: #f85149; }
+    .comment.sev-blocking, .comment.sev-blocker { border-left-color: #f85149; }
     .comment.sev-warning { border-left-color: #d29922; }
     .comment.sev-nit { border-left-color: #58a6ff; }
     .comment-meta { font-size: 12px; color: #8b949e; margin-bottom: 5px; display: flex; gap: 8px; align-items: center; }
     .sev { padding: 1px 6px; border-radius: 10px; font-size: 10px; text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px; }
-    .sev-blocker .sev, .sev.blocker { background: rgba(248,81,73,0.2); color: #f85149; }
+    .sev-blocking .sev, .sev.blocking, .sev-blocker .sev, .sev.blocker { background: rgba(248,81,73,0.2); color: #f85149; }
     .sev-warning .sev, .sev.warning { background: rgba(210,153,34,0.2); color: #d29922; }
     .sev-nit .sev, .sev.nit { background: rgba(88,166,255,0.2); color: #58a6ff; }
     .comment-text { font-size: 14px; line-height: 1.5; }
@@ -461,7 +463,17 @@
       if (!r || r.status !== "done") return '<span class="comment-count">—</span>';
       const n = r.commentCount;
       if (n == null) return '<span class="comment-count">—</span>';
+      const b = r.blockingCount || 0;
+      if (b > 0) {
+        return `<span class="comment-count blocking" title="${b} blocking comment${b === 1 ? "" : "s"}">${n}<span class="blk-badge">${b}⛔</span></span>`;
+      }
       return `<span class="comment-count ${n > 0 ? "has" : ""}">${n}</span>`;
+    }
+
+    // Number of blocking comments on a reviewed PR (0 if not reviewed).
+    function blockingCount(pr) {
+      const r = reviewData[prKey(pr)];
+      return r && r.status === "done" ? (r.blockingCount || 0) : 0;
     }
 
     // Sort value: PRs with no score yet sink to the bottom regardless of dir.
@@ -544,6 +556,16 @@
         const ra = statusRank(a);
         const rb = statusRank(b);
         if (ra !== rb) return ra - rb;
+
+        // In the "reviewable" view, PRs with blocking comments are top priority:
+        // any-blocking first, then by number of blockers (most first), before
+        // the reviewable score decides the rest.
+        if (sortKey === "reviewable") {
+          const ba = blockingCount(a);
+          const bb = blockingCount(b);
+          if ((ba > 0) !== (bb > 0)) return bb - ba > 0 ? 1 : -1;
+          if (ba > 0 && ba !== bb) return bb - ba;
+        }
 
         // Within a tier, apply the chosen sort; nulls fall to the tier's end.
         const va = sortValue(a);

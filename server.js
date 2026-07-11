@@ -479,6 +479,9 @@ app.get("/api/reviews", (req, res) => {
       calibratedReviewable: effectiveScore(r, "reviewable"),
       isCalibrated: !!(r.calibrated && (r.calibrated.risk != null || r.calibrated.reviewable != null)),
       commentCount: Array.isArray(r.comments) ? r.comments.length : null,
+      blockingCount: Array.isArray(r.comments)
+        ? r.comments.filter((c) => c && (c.severity === "blocking" || c.severity === "blocker")).length
+        : 0,
       reviewedAt: r.reviewedAt || null,
     };
   }
