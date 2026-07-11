@@ -220,10 +220,10 @@
     .comment-text { font-size: 14px; line-height: 1.5; }
     .lineno { font-variant-numeric: tabular-nums; }
     .comment-actions { margin-left: auto; display: flex; gap: 8px; }
-    .copy-btn, .post-btn {
+    .copy-btn, .post-btn, .dismiss-btn {
       background: none; border: 1px solid #30363d;
       font-size: 11px; padding: 1px 8px; border-radius: 6px;
-      cursor: pointer; line-height: 1.6;
+      cursor: pointer; line-height: 1.6; text-decoration: none; display: inline-block;
     }
     .copy-btn { color: #8b949e; }
     .copy-btn:hover { background: #21262d; color: #e6edf3; }
@@ -233,6 +233,10 @@
     .post-btn:disabled { cursor: default; opacity: 0.85; }
     .post-btn.posted { color: #3fb950; border-color: rgba(63,185,80,0.4); cursor: default; }
     .post-btn.failed { color: #f85149; border-color: rgba(248,81,73,0.4); }
+    .dismiss-btn { color: #8b949e; }
+    .dismiss-btn:hover { background: #21262d; color: #f85149; }
+    .comment.dismissed { opacity: 0.5; }
+    .comment.dismissed .comment-text { text-decoration: line-through; }
     .empty-comments { color: #8b949e; font-size: 14px; }
     .modal-err { color: #f85149; font-size: 13px; white-space: pre-wrap; font-family: ui-monospace, monospace; background: #161b22; border: 1px solid #21262d; border-radius: 6px; padding: 12px; }
   </style>
@@ -291,6 +295,7 @@
     let openKey = null;
     let modalStatus = null;     // last review status rendered into the open modal
     let detailComments = [];    // comments for the open modal, indexed for copy
+    let openReview = null;      // full review object backing the open modal
     const PAGE_SIZE = 50;
     let visibleCount = PAGE_SIZE; // infinite-scroll window over the awake list
     let prsFetchedAt = null;      // when the cached PR list was last refreshed
@@ -397,7 +402,10 @@
           body: JSON.stringify({ index: ci }),
         });
         const data = await res.json().catch(() => ({}));
-        if (res.ok && data.status === "posted") {
+        if ((res.ok && data.status === "posted") || data.status === "already-posted") {
+          // Record it on the comment so re-renders/reopens keep it marked posted.
+          const c = detailComments[ci];
+          if (c) c.posted = { at: data.at || null, url: data.url || null };
           btn.textContent = "Posted ✓";
           btn.classList.add("posted");
           btn.title = data.url || "Posted";
@@ -688,6 +696,7 @@
     }
 
     function renderDetail(key, pr, r) {
+      openReview = r || null;
       const title = pr ? escapeHtml(pr.title) : key;
       const url = pr ? pr.url : `https://github.com/${key.replace("#", "/pull/")}`;
       const repo = pr ? pr.repository.nameWithOwner : key.split("#")[0];
@@ -727,15 +736,21 @@
               ${cs.map((c) => {
                 const ci = detailComments.indexOf(c);
                 const canPost = c.file && c.line != null;
+                const actions = c.dismissed
+                  ? `<button class="copy-btn" data-action="copy" data-ci="${ci}" title="Copy comment text">Copy</button>
+                     <button class="dismiss-btn" data-action="undismiss" data-ci="${ci}" title="Restore this comment">Undo dismiss</button>`
+                  : `${c.posted
+                        ? `<a class="post-btn posted" href="${escapeHtml(c.posted.url || "#")}" target="_blank" title="Posted${c.posted.at ? " " + timeAgo(c.posted.at) : ""} — view on GitHub">Posted ✓</a>`
+                        : (canPost ? `<button class="post-btn" data-action="post" data-ci="${ci}" title="Post this as an inline comment on the PR">Comment</button>` : "")}
+                     <button class="copy-btn" data-action="copy" data-ci="${ci}" title="Copy comment text">Copy</button>
+                     <button class="dismiss-btn" data-action="dismiss" data-ci="${ci}" title="Dismiss this comment (bad suggestion) — excludes it from ranking">Dismiss</button>`;
                 return `
-                <div class="comment sev-${c.severity}">
+                <div class="comment sev-${c.severity}${c.dismissed ? " dismissed" : ""}">
                   <div class="comment-meta">
                     <span class="sev ${c.severity}">${c.severity}</span>
                     ${c.line != null ? `<span class="lineno">line ${c.line}</span>` : ""}
-                    <span class="comment-actions">
-                      ${canPost ? `<button class="post-btn" data-action="post" data-ci="${ci}" title="Post this as an inline comment on the PR">Comment</button>` : ""}
-                      <button class="copy-btn" data-action="copy" data-ci="${ci}" title="Copy comment text">Copy</button>
-                    </span>
+                    ${c.dismissed ? `<span class="raw-note">dismissed</span>` : ""}
+                    <span class="comment-actions">${actions}</span>
                   </div>
                   <div class="comment-text">${escapeHtml(c.comment)}</div>
                 </div>`;
@@ -786,7 +801,40 @@
     function closeDetail() {
       openKey = null;
       modalStatus = null;
+      openReview = null;
       overlay.classList.remove("visible");
+    }
+
+    // Toggle a comment's dismissed state, then re-render the modal and refresh
+    // the table counts (dismissed comments don't count toward ranking).
+    async function dismissComment(btn, dismissed) {
+      const ci = Number(btn.dataset.ci);
+      const c = detailComments[ci];
+      if (!c || !openKey) return;
+      try {
+        const res = await fetch(`/api/reviews/${encodeURIComponent(openKey)}/dismiss`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ index: ci, dismissed }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) return;
+        if (data.dismissed) c.dismissed = true;
+        else delete c.dismissed;
+        // Optimistically update the row's counts so ranking reflects it now
+        // (the next /api/reviews poll will confirm from the server).
+        const rd = reviewData[openKey];
+        if (rd) {
+          const active = detailComments.filter((x) => x && !x.dismissed);
+          rd.commentCount = active.length;
+          rd.blockingCount = active.filter((x) => x.severity === "blocking" || x.severity === "blocker").length;
+          rd.postedCount = active.filter((x) => x.posted).length;
+        }
+        if (openReview) renderDetail(openKey, findPR(openKey), openReview);
+        render();
+      } catch {
+        // leave the comment as-is on failure
+      }
     }
 
     async function rereview(key) {
@@ -974,6 +1022,8 @@
       const action = el?.dataset.action;
       if (action === "copy") { copyComment(el); return; }
       if (action === "post") { postComment(el); return; }
+      if (action === "dismiss") { dismissComment(el, true); return; }
+      if (action === "undismiss") { dismissComment(el, false); return; }
       if (action === "close") closeDetail();
       if (action === "rereview" && openKey) rereview(openKey);
     });

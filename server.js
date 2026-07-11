@@ -64,6 +64,8 @@ function getActiveSleep() {
 //   title, repo, number,                       // memory metadata
 //   risk, reviewable, summary, comments, sha, error, reviewedAt,
 //   calibrated: { risk, reviewable, reason } // set by the calibration pass
+// Each comment is { file, line, severity, comment, posted?: { at, url } };
+// `posted` is set once we post it to the PR so we don't post it twice.
 // }
 // This map is also the persistent "memory" of every PR ever reviewed.
 const reviews = readJson(REVIEWS_FILE, {});
@@ -107,6 +109,12 @@ function effectiveScore(r, field) {
   return r ? r[field] ?? null : null;
 }
 
+// Comments that still "count" — dismissed ones are excluded from all counts that
+// feed ranking (blocking priority) and calibration signals.
+function activeComments(r) {
+  return Array.isArray(r && r.comments) ? r.comments.filter((c) => c && !c.dismissed) : [];
+}
+
 // Build the review "memory" passed into a new review as calibration anchors.
 // We sample across the score range (not just recent) so the anchors span the
 // whole scale, and exclude the PR being reviewed.
@@ -117,7 +125,7 @@ function buildMemorySample(excludeKey) {
       title: r.title,
       risk: effectiveScore(r, "risk"),
       reviewable: effectiveScore(r, "reviewable"),
-      commentCount: Array.isArray(r.comments) ? r.comments.length : 0,
+      commentCount: activeComments(r).length,
       summary: r.summary,
     }));
 
@@ -253,7 +261,7 @@ function doneReviewItems() {
       risk: r.risk,
       reviewable: r.reviewable,
       summary: r.summary,
-      commentCount: Array.isArray(r.comments) ? r.comments.length : 0,
+      commentCount: activeComments(r).length,
     }));
 }
 
@@ -478,10 +486,12 @@ app.get("/api/reviews", (req, res) => {
       calibratedRisk: effectiveScore(r, "risk"),
       calibratedReviewable: effectiveScore(r, "reviewable"),
       isCalibrated: !!(r.calibrated && (r.calibrated.risk != null || r.calibrated.reviewable != null)),
-      commentCount: Array.isArray(r.comments) ? r.comments.length : null,
-      blockingCount: Array.isArray(r.comments)
-        ? r.comments.filter((c) => c && (c.severity === "blocking" || c.severity === "blocker")).length
-        : 0,
+      // Counts exclude dismissed comments so they don't affect ranking.
+      commentCount: Array.isArray(r.comments) ? activeComments(r).length : null,
+      blockingCount: activeComments(r).filter(
+        (c) => c.severity === "blocking" || c.severity === "blocker"
+      ).length,
+      postedCount: activeComments(r).filter((c) => c.posted).length,
       reviewedAt: r.reviewedAt || null,
     };
   }
@@ -547,6 +557,14 @@ app.post("/api/reviews/:key/comment", async (req, res) => {
   const number = key.slice(hashIdx + 1);
   const c = r.comments[idx];
 
+  // Already posted — don't post it again.
+  if (c.posted) {
+    return res.status(409).json({
+      status: "already-posted",
+      url: c.posted.url || null,
+      at: c.posted.at || null,
+    });
+  }
   if (!c.file || c.line == null) {
     return res.status(400).json({ error: "comment is not anchored to a file and line" });
   }
@@ -568,13 +586,39 @@ app.post("/api/reviews/:key/comment", async (req, res) => {
       "-F", `line=${c.line}`,
       "-f", "side=RIGHT",
     ]);
+    // Record that we posted it so it isn't accidentally re-posted (survives
+    // restarts via reviews.json).
+    c.posted = { at: new Date().toISOString(), url: created.html_url || null };
+    persistReviews();
     log(`posted inline comment on ${key} (${c.file}:${c.line})`);
-    return res.json({ status: "posted", url: created.html_url || null });
+    return res.json({ status: "posted", url: c.posted.url, at: c.posted.at });
   } catch (e) {
     const msg = (e.stderr || e.message || "unknown error").trim().slice(0, 500);
     log(`failed to post comment on ${key} (${c.file}:${c.line}): ${msg}`);
     return res.status(502).json({ error: msg });
   }
+});
+
+// Dismiss (or restore) a suggested comment. Dismissed comments stay visible in
+// the detail view but are excluded from all ranking/calibration counts. Body:
+// { index, dismissed } (dismissed defaults to true).
+app.post("/api/reviews/:key/dismiss", (req, res) => {
+  const key = req.params.key;
+  const r = reviews[key];
+  const idx = Number(req.body && req.body.index);
+
+  if (!r || !Array.isArray(r.comments) || !Number.isInteger(idx) || !r.comments[idx]) {
+    return res.status(400).json({ error: "no such comment" });
+  }
+
+  const dismissed = req.body.dismissed !== false;
+  if (dismissed) {
+    r.comments[idx].dismissed = true;
+  } else {
+    delete r.comments[idx].dismissed;
+  }
+  persistReviews();
+  return res.json({ status: "ok", dismissed });
 });
 
 app.get("/api/sleep", (req, res) => {
