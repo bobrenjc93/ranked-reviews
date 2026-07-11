@@ -378,13 +378,12 @@
     }
 
     // Post a suggested comment to the PR as an inline review comment (via gh on
-    // the server). Confirms first — this publishes publicly on the PR.
+    // the server).
     async function postComment(btn) {
       if (btn.disabled || !openKey) return;
       const ci = Number(btn.dataset.ci);
       const c = detailComments[ci];
       if (!c) return;
-      if (!confirm(`Post this inline comment on ${openKey}?\n\n${c.file}:${c.line}\n\n${c.comment}`)) return;
 
       btn.disabled = true;
       btn.classList.remove("failed");
