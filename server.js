@@ -368,11 +368,16 @@ async function fetchPrsFromGh() {
   return prs.filter((pr) => {
     if (!pr.author || pr.author.login.toLowerCase() === viewerLogin || pr.isDraft) return false;
 
-    // Drop PRs you've already acted on — where YOUR latest review is an approval
-    // or a changes-request — unless your review has since been re-requested (you
-    // are individually back in the review-request list). This is based on your
-    // own review, not the PR's overall decision, so PRs approved by others that
-    // still need your review stay on the list.
+    // Skip PRs that already have an overall review decision: an approval, or
+    // changes requested (waiting on the author, not on a fresh review).
+    if (pr.reviewDecision === "APPROVED" || pr.reviewDecision === "CHANGES_REQUESTED") {
+      return false;
+    }
+
+    // Belt-and-suspenders for the case where the overall decision is still
+    // pending but YOU already reviewed (e.g. you approved via a team request):
+    // drop it unless your review was re-requested (you're individually back in
+    // the review-request list).
     const reRequested = (pr.reviewRequests || []).some(
       (r) => (r.login || "").toLowerCase() === viewerLogin
     );
@@ -381,7 +386,9 @@ async function fetchPrsFromGh() {
     );
     const alreadyReviewed =
       myReview && (myReview.state === "APPROVED" || myReview.state === "CHANGES_REQUESTED");
-    return !(alreadyReviewed && !reRequested);
+    if (alreadyReviewed && !reRequested) return false;
+
+    return true;
   });
 }
 

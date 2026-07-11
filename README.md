@@ -5,9 +5,9 @@ A local app that ranks the GitHub pull requests you've been asked to review by
 
 It's a descendant of [theirprs](https://github.com/bobrenjc93/theirprs): same set
 of PRs (open, review requested from `@me`, not your own, not a draft, and not ones
-you've already reviewed — approved or requested changes — unless your review was
-re-requested), but instead of a flat list you get a sortable table driven by an
-automated review.
+that already have an overall decision — approved or changes-requested — nor ones
+you've personally reviewed already, unless your review was re-requested), but
+instead of a flat list you get a sortable table driven by an automated review.
 
 For each PR, `ranked-reviews` checks the PR out into a git worktree and runs
 `claude -p` over it to produce:

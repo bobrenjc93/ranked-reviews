@@ -217,6 +217,13 @@
     .sev-nit .sev, .sev.nit { background: rgba(88,166,255,0.2); color: #58a6ff; }
     .comment-text { font-size: 14px; line-height: 1.5; }
     .lineno { font-variant-numeric: tabular-nums; }
+    .copy-btn {
+      margin-left: auto; background: none; border: 1px solid #30363d;
+      color: #8b949e; font-size: 11px; padding: 1px 8px; border-radius: 6px;
+      cursor: pointer; line-height: 1.6;
+    }
+    .copy-btn:hover { background: #21262d; color: #e6edf3; }
+    .copy-btn.copied { color: #3fb950; border-color: rgba(63,185,80,0.4); }
     .empty-comments { color: #8b949e; font-size: 14px; }
     .modal-err { color: #f85149; font-size: 13px; white-space: pre-wrap; font-family: ui-monospace, monospace; background: #161b22; border: 1px solid #21262d; border-radius: 6px; padding: 12px; }
   </style>
@@ -273,6 +280,8 @@
     let lastClickedKey = null;
     let renderedKeys = [];
     let openKey = null;
+    let modalStatus = null;     // last review status rendered into the open modal
+    let detailComments = [];    // comments for the open modal, indexed for copy
     const PAGE_SIZE = 50;
     let visibleCount = PAGE_SIZE; // infinite-scroll window over the awake list
     let prsFetchedAt = null;      // when the cached PR list was last refreshed
@@ -316,6 +325,49 @@
       const d = document.createElement("div");
       d.textContent = text == null ? "" : text;
       return d.innerHTML;
+    }
+
+    // True while the user has an active (non-empty) text selection — used to
+    // avoid rebuilding the DOM under them mid-copy.
+    function hasSelection() {
+      const s = window.getSelection && window.getSelection();
+      return !!(s && s.type === "Range" && String(s).trim().length > 0);
+    }
+
+    // Copy text to the clipboard, with a fallback for non-secure contexts.
+    async function copyText(text) {
+      try {
+        await navigator.clipboard.writeText(text);
+        return true;
+      } catch {
+        try {
+          const ta = document.createElement("textarea");
+          ta.value = text;
+          ta.style.position = "fixed";
+          ta.style.opacity = "0";
+          document.body.appendChild(ta);
+          ta.select();
+          const ok = document.execCommand("copy");
+          document.body.removeChild(ta);
+          return ok;
+        } catch {
+          return false;
+        }
+      }
+    }
+
+    async function copyComment(btn) {
+      const c = detailComments[Number(btn.dataset.ci)];
+      if (!c) return;
+      const ok = await copyText(c.comment);
+      const prev = btn.dataset.label || btn.textContent;
+      btn.dataset.label = prev;
+      btn.textContent = ok ? "Copied" : "Failed";
+      btn.classList.add("copied");
+      setTimeout(() => {
+        btn.textContent = prev;
+        btn.classList.remove("copied");
+      }, 1200);
     }
 
     function timeAgo(dateStr) {
@@ -566,6 +618,7 @@
         r = { status: "error", error: "Failed to load review." };
       }
       if (openKey !== key) return; // user moved on
+      modalStatus = r ? r.status : null;
       renderDetail(key, pr, r);
     }
 
@@ -592,14 +645,15 @@
             ? `<span class="raw-note">raw ${r[field]}</span>`
             : "";
 
+        detailComments = r.comments || [];
         const groups = new Map();
-        for (const c of r.comments || []) {
+        for (const c of detailComments) {
           if (!groups.has(c.file)) groups.set(c.file, []);
           groups.get(c.file).push(c);
         }
 
         let commentsHtml;
-        if (!r.comments || r.comments.length === 0) {
+        if (detailComments.length === 0) {
           commentsHtml = '<div class="empty-comments">No suggested comments — this PR looks clean.</div>';
         } else {
           commentsHtml = [...groups.entries()].map(([file, cs]) => `
@@ -610,6 +664,7 @@
                   <div class="comment-meta">
                     <span class="sev ${c.severity}">${c.severity}</span>
                     ${c.line != null ? `<span class="lineno">line ${c.line}</span>` : ""}
+                    <button class="copy-btn" data-action="copy" data-ci="${detailComments.indexOf(c)}" title="Copy comment text">Copy</button>
                   </div>
                   <div class="comment-text">${escapeHtml(c.comment)}</div>
                 </div>`).join("")}
@@ -658,6 +713,7 @@
 
     function closeDetail() {
       openKey = null;
+      modalStatus = null;
       overlay.classList.remove("visible");
     }
 
@@ -751,13 +807,23 @@
         const data = await (await fetch("/api/reviews")).json();
         reviewData = data.reviews || {};
         calibrationData = data.calibration || {};
+        // Don't rebuild the DOM while the user is selecting text — it would clear
+        // the selection out from under them (e.g. mid-copy).
+        if (hasSelection()) return;
         if (allPRs.length) render();
         if (openKey) {
           const cur = reviewData[openKey];
-          // Refresh the open modal when its review just finished.
-          if (cur && (cur.status === "done" || cur.status === "error")) {
-            const r = await (await fetch(`/api/reviews/${encodeURIComponent(openKey)}`)).json();
-            if (openKey) renderDetail(openKey, findPR(openKey), r);
+          const status = cur ? cur.status : "unprocessed";
+          // Only re-render the modal when the status actually changes, so a
+          // finished review isn't rebuilt every tick (which would fight copying).
+          if (status !== modalStatus) {
+            modalStatus = status;
+            if (status === "done" || status === "error") {
+              const r = await (await fetch(`/api/reviews/${encodeURIComponent(openKey)}`)).json();
+              if (openKey) renderDetail(openKey, findPR(openKey), r);
+            } else if (openKey) {
+              renderDetail(openKey, findPR(openKey), cur || { status });
+            }
           }
         }
       } catch {
@@ -832,7 +898,9 @@
 
     overlay.addEventListener("click", (e) => {
       if (e.target === overlay) { closeDetail(); return; }
-      const action = e.target.closest("[data-action]")?.dataset.action;
+      const el = e.target.closest("[data-action]");
+      const action = el?.dataset.action;
+      if (action === "copy") { copyComment(el); return; }
       if (action === "close") closeDetail();
       if (action === "rereview" && openKey) rereview(openKey);
     });
