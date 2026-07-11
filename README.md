@@ -22,7 +22,8 @@ For each PR, `ranked-reviews` checks the PR out into a git worktree and runs
   name and line number.
 
 The two scores show up in the main table. The comments show up when you click a
-PR open.
+PR open — each has a **Copy** button, and a **Comment** button that posts it to
+the PR as an inline review comment (via `gh`, after a confirmation prompt).
 
 ## How it works
 
@@ -134,6 +135,12 @@ REVIEW_CONCURRENCY=5 REVIEW_MODEL=opus npm start
 - Reviews run `claude -p` with `--permission-mode bypassPermissions` so it can
   read files non-interactively. It is prompted only to **review** (not edit), but
   it does check out and read PR code, so run this against repositories you trust.
+- The **Comment** button on a suggested comment writes to GitHub: it posts an
+  inline review comment on the PR via `gh api` (`POST /repos/.../pulls/.../comments`),
+  anchored to the reviewed commit and the comment's file/line. It asks for
+  confirmation first, since this is public and uses your `gh` identity. If the
+  line isn't part of the PR diff, GitHub rejects it (422) and the button shows an
+  error you can hover for details.
 - Worktrees and repo clones live under `~/.ranked-reviews/`. They're cleaned up
   after each review; clones are kept and reused.
 - The "sleep" feature from theirprs is preserved: select PRs and snooze them for

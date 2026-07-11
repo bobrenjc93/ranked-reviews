@@ -528,6 +528,52 @@ app.post("/api/reviews/:key/refresh", (req, res) => {
   res.json({ status: "queued" });
 });
 
+// Post one of a review's suggested comments to the PR as an inline review
+// comment, via the GitHub API (`gh api`). Body: { index } into r.comments.
+app.post("/api/reviews/:key/comment", async (req, res) => {
+  const key = req.params.key;
+  const r = reviews[key];
+  const idx = Number(req.body && req.body.index);
+
+  if (!r || !Array.isArray(r.comments) || !Number.isInteger(idx) || !r.comments[idx]) {
+    return res.status(400).json({ error: "no such comment" });
+  }
+
+  const hashIdx = key.lastIndexOf("#");
+  const repo = key.slice(0, hashIdx);
+  const number = key.slice(hashIdx + 1);
+  const c = r.comments[idx];
+
+  if (!c.file || c.line == null) {
+    return res.status(400).json({ error: "comment is not anchored to a file and line" });
+  }
+  if (!r.sha) {
+    return res.status(400).json({ error: "no reviewed commit on record — re-review the PR first" });
+  }
+
+  try {
+    // POST /repos/{owner}/{repo}/pulls/{n}/comments creates an inline review
+    // comment. `line` is on the new version of the file (side=RIGHT) and must be
+    // part of the PR diff, or GitHub returns 422.
+    const created = await execGhJson([
+      "api",
+      "-X", "POST",
+      `/repos/${repo}/pulls/${number}/comments`,
+      "-f", `body=${c.comment}`,
+      "-f", `commit_id=${r.sha}`,
+      "-f", `path=${c.file}`,
+      "-F", `line=${c.line}`,
+      "-f", "side=RIGHT",
+    ]);
+    log(`posted inline comment on ${key} (${c.file}:${c.line})`);
+    return res.json({ status: "posted", url: created.html_url || null });
+  } catch (e) {
+    const msg = (e.stderr || e.message || "unknown error").trim().slice(0, 500);
+    log(`failed to post comment on ${key} (${c.file}:${c.line}): ${msg}`);
+    return res.status(502).json({ error: msg });
+  }
+});
+
 app.get("/api/sleep", (req, res) => {
   res.json(getActiveSleep());
 });

@@ -217,13 +217,20 @@
     .sev-nit .sev, .sev.nit { background: rgba(88,166,255,0.2); color: #58a6ff; }
     .comment-text { font-size: 14px; line-height: 1.5; }
     .lineno { font-variant-numeric: tabular-nums; }
-    .copy-btn {
-      margin-left: auto; background: none; border: 1px solid #30363d;
-      color: #8b949e; font-size: 11px; padding: 1px 8px; border-radius: 6px;
+    .comment-actions { margin-left: auto; display: flex; gap: 8px; }
+    .copy-btn, .post-btn {
+      background: none; border: 1px solid #30363d;
+      font-size: 11px; padding: 1px 8px; border-radius: 6px;
       cursor: pointer; line-height: 1.6;
     }
+    .copy-btn { color: #8b949e; }
     .copy-btn:hover { background: #21262d; color: #e6edf3; }
     .copy-btn.copied { color: #3fb950; border-color: rgba(63,185,80,0.4); }
+    .post-btn { color: #58a6ff; }
+    .post-btn:hover { background: #21262d; }
+    .post-btn:disabled { cursor: default; opacity: 0.85; }
+    .post-btn.posted { color: #3fb950; border-color: rgba(63,185,80,0.4); cursor: default; }
+    .post-btn.failed { color: #f85149; border-color: rgba(248,81,73,0.4); }
     .empty-comments { color: #8b949e; font-size: 14px; }
     .modal-err { color: #f85149; font-size: 13px; white-space: pre-wrap; font-family: ui-monospace, monospace; background: #161b22; border: 1px solid #21262d; border-radius: 6px; padding: 12px; }
   </style>
@@ -368,6 +375,43 @@
         btn.textContent = prev;
         btn.classList.remove("copied");
       }, 1200);
+    }
+
+    // Post a suggested comment to the PR as an inline review comment (via gh on
+    // the server). Confirms first — this publishes publicly on the PR.
+    async function postComment(btn) {
+      if (btn.disabled || !openKey) return;
+      const ci = Number(btn.dataset.ci);
+      const c = detailComments[ci];
+      if (!c) return;
+      if (!confirm(`Post this inline comment on ${openKey}?\n\n${c.file}:${c.line}\n\n${c.comment}`)) return;
+
+      btn.disabled = true;
+      btn.classList.remove("failed");
+      btn.textContent = "Posting…";
+      try {
+        const res = await fetch(`/api/reviews/${encodeURIComponent(openKey)}/comment`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ index: ci }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.status === "posted") {
+          btn.textContent = "Posted ✓";
+          btn.classList.add("posted");
+          btn.title = data.url || "Posted";
+        } else {
+          btn.textContent = "Retry";
+          btn.classList.add("failed");
+          btn.title = data.error || `Failed (HTTP ${res.status})`;
+          btn.disabled = false;
+        }
+      } catch (e) {
+        btn.textContent = "Retry";
+        btn.classList.add("failed");
+        btn.title = (e && e.message) || String(e);
+        btn.disabled = false;
+      }
     }
 
     function timeAgo(dateStr) {
@@ -659,15 +703,22 @@
           commentsHtml = [...groups.entries()].map(([file, cs]) => `
             <div class="file-group">
               <div class="file-name">${escapeHtml(file || "(unknown file)")}</div>
-              ${cs.map((c) => `
+              ${cs.map((c) => {
+                const ci = detailComments.indexOf(c);
+                const canPost = c.file && c.line != null;
+                return `
                 <div class="comment sev-${c.severity}">
                   <div class="comment-meta">
                     <span class="sev ${c.severity}">${c.severity}</span>
                     ${c.line != null ? `<span class="lineno">line ${c.line}</span>` : ""}
-                    <button class="copy-btn" data-action="copy" data-ci="${detailComments.indexOf(c)}" title="Copy comment text">Copy</button>
+                    <span class="comment-actions">
+                      ${canPost ? `<button class="post-btn" data-action="post" data-ci="${ci}" title="Post this as an inline comment on the PR">Comment</button>` : ""}
+                      <button class="copy-btn" data-action="copy" data-ci="${ci}" title="Copy comment text">Copy</button>
+                    </span>
                   </div>
                   <div class="comment-text">${escapeHtml(c.comment)}</div>
-                </div>`).join("")}
+                </div>`;
+              }).join("")}
             </div>`).join("");
         }
 
@@ -901,6 +952,7 @@
       const el = e.target.closest("[data-action]");
       const action = el?.dataset.action;
       if (action === "copy") { copyComment(el); return; }
+      if (action === "post") { postComment(el); return; }
       if (action === "close") closeDetail();
       if (action === "rereview" && openKey) rereview(openKey);
     });
