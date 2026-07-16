@@ -237,6 +237,7 @@
     .dismiss-btn:hover { background: #21262d; color: #f85149; }
     .comment.dismissed { opacity: 0.5; }
     .comment.dismissed .comment-text { text-decoration: line-through; }
+    .comment.posted { opacity: 0.65; }
     .empty-comments { color: #8b949e; font-size: 14px; }
     .modal-err { color: #f85149; font-size: 13px; white-space: pre-wrap; font-family: ui-monospace, monospace; background: #161b22; border: 1px solid #21262d; border-radius: 6px; padding: 12px; }
   </style>
@@ -403,12 +404,16 @@
         });
         const data = await res.json().catch(() => ({}));
         if ((res.ok && data.status === "posted") || data.status === "already-posted") {
-          // Record it on the comment so re-renders/reopens keep it marked posted.
+          // Mark posted + auto-dismissed (a posted comment is handled), then
+          // re-render so it shows as posted and drops out of the ranking counts.
           const c = detailComments[ci];
-          if (c) c.posted = { at: data.at || null, url: data.url || null };
-          btn.textContent = "Posted ✓";
-          btn.classList.add("posted");
-          btn.title = data.url || "Posted";
+          if (c) {
+            c.posted = { at: data.at || null, url: data.url || null };
+            c.dismissed = true;
+          }
+          refreshOpenCounts();
+          if (openReview) renderDetail(openKey, findPR(openKey), openReview);
+          render();
         } else {
           btn.textContent = "Retry";
           btn.classList.add("failed");
@@ -736,20 +741,31 @@
               ${cs.map((c) => {
                 const ci = detailComments.indexOf(c);
                 const canPost = c.file && c.line != null;
-                const actions = c.dismissed
-                  ? `<button class="copy-btn" data-action="copy" data-ci="${ci}" title="Copy comment text">Copy</button>
-                     <button class="dismiss-btn" data-action="undismiss" data-ci="${ci}" title="Restore this comment">Undo dismiss</button>`
-                  : `${c.posted
-                        ? `<a class="post-btn posted" href="${escapeHtml(c.posted.url || "#")}" target="_blank" title="Posted${c.posted.at ? " " + timeAgo(c.posted.at) : ""} — view on GitHub">Posted ✓</a>`
-                        : (canPost ? `<button class="post-btn" data-action="post" data-ci="${ci}" title="Post this as an inline comment on the PR">Comment</button>` : "")}
-                     <button class="copy-btn" data-action="copy" data-ci="${ci}" title="Copy comment text">Copy</button>
+                const copyBtn = `<button class="copy-btn" data-action="copy" data-ci="${ci}" title="Copy comment text">Copy</button>`;
+                let actions, stateClass, stateNote;
+                if (c.posted) {
+                  // Posted comments are auto-dismissed (handled).
+                  actions = `<a class="post-btn posted" href="${escapeHtml(c.posted.url || "#")}" target="_blank" title="Posted${c.posted.at ? " " + timeAgo(c.posted.at) : ""} — view on GitHub">Posted ✓</a> ${copyBtn}`;
+                  stateClass = " posted";
+                  stateNote = `<span class="raw-note">posted</span>`;
+                } else if (c.dismissed) {
+                  actions = `${copyBtn}
+                     <button class="dismiss-btn" data-action="undismiss" data-ci="${ci}" title="Restore this comment">Undo dismiss</button>`;
+                  stateClass = " dismissed";
+                  stateNote = `<span class="raw-note">dismissed</span>`;
+                } else {
+                  actions = `${canPost ? `<button class="post-btn" data-action="post" data-ci="${ci}" title="Post this as an inline comment on the PR">Comment</button>` : ""}
+                     ${copyBtn}
                      <button class="dismiss-btn" data-action="dismiss" data-ci="${ci}" title="Dismiss this comment (bad suggestion) — excludes it from ranking">Dismiss</button>`;
+                  stateClass = "";
+                  stateNote = "";
+                }
                 return `
-                <div class="comment sev-${c.severity}${c.dismissed ? " dismissed" : ""}">
+                <div class="comment sev-${c.severity}${stateClass}">
                   <div class="comment-meta">
                     <span class="sev ${c.severity}">${c.severity}</span>
                     ${c.line != null ? `<span class="lineno">line ${c.line}</span>` : ""}
-                    ${c.dismissed ? `<span class="raw-note">dismissed</span>` : ""}
+                    ${stateNote}
                     <span class="comment-actions">${actions}</span>
                   </div>
                   <div class="comment-text">${escapeHtml(c.comment)}</div>
@@ -805,6 +821,19 @@
       overlay.classList.remove("visible");
     }
 
+    // Recompute the open PR's row counts from the in-memory comments so ranking
+    // reflects dismiss/post changes immediately (the next /api/reviews poll then
+    // confirms from the server). Posted comments count in postedCount even
+    // though they're auto-dismissed; commentCount/blockingCount exclude them.
+    function refreshOpenCounts() {
+      const rd = reviewData[openKey];
+      if (!rd) return;
+      const active = detailComments.filter((x) => x && !x.dismissed);
+      rd.commentCount = active.length;
+      rd.blockingCount = active.filter((x) => x.severity === "blocking" || x.severity === "blocker").length;
+      rd.postedCount = detailComments.filter((x) => x && x.posted).length;
+    }
+
     // Toggle a comment's dismissed state, then re-render the modal and refresh
     // the table counts (dismissed comments don't count toward ranking).
     async function dismissComment(btn, dismissed) {
@@ -821,15 +850,7 @@
         if (!res.ok) return;
         if (data.dismissed) c.dismissed = true;
         else delete c.dismissed;
-        // Optimistically update the row's counts so ranking reflects it now
-        // (the next /api/reviews poll will confirm from the server).
-        const rd = reviewData[openKey];
-        if (rd) {
-          const active = detailComments.filter((x) => x && !x.dismissed);
-          rd.commentCount = active.length;
-          rd.blockingCount = active.filter((x) => x.severity === "blocking" || x.severity === "blocker").length;
-          rd.postedCount = active.filter((x) => x.posted).length;
-        }
+        refreshOpenCounts();
         if (openReview) renderDetail(openKey, findPR(openKey), openReview);
         render();
       } catch {

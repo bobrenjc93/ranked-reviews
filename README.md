@@ -29,7 +29,9 @@ PR open — each has:
 - a **Copy** button,
 - a **Comment** button that posts it to the PR as an inline review comment (via
   `gh`). Once posted it's remembered (persisted in `reviews.json`) and shown as
-  **Posted ✓** linking to the comment, so it can't be posted twice by accident,
+  **Posted ✓** linking to the comment, so it can't be posted twice by accident.
+  Posting also **auto-dismisses** the comment (a posted comment is handled), so
+  it drops out of the ranking counts,
 - a **Dismiss** button for bad suggestions. Dismissed comments stay visible
   (struck through, with an undo) but are excluded from the ranking counts, so a
   PR whose only blocking comments are dismissed no longer floats to the top.

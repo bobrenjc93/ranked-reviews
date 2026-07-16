@@ -486,12 +486,13 @@ app.get("/api/reviews", (req, res) => {
       calibratedRisk: effectiveScore(r, "risk"),
       calibratedReviewable: effectiveScore(r, "reviewable"),
       isCalibrated: !!(r.calibrated && (r.calibrated.risk != null || r.calibrated.reviewable != null)),
-      // Counts exclude dismissed comments so they don't affect ranking.
+      // Counts exclude dismissed comments so they don't affect ranking. Posted
+      // comments are auto-dismissed, so postedCount counts them regardless.
       commentCount: Array.isArray(r.comments) ? activeComments(r).length : null,
       blockingCount: activeComments(r).filter(
         (c) => c.severity === "blocking" || c.severity === "blocker"
       ).length,
-      postedCount: activeComments(r).filter((c) => c.posted).length,
+      postedCount: Array.isArray(r.comments) ? r.comments.filter((c) => c && c.posted).length : 0,
       reviewedAt: r.reviewedAt || null,
     };
   }
@@ -587,8 +588,10 @@ app.post("/api/reviews/:key/comment", async (req, res) => {
       "-f", "side=RIGHT",
     ]);
     // Record that we posted it so it isn't accidentally re-posted (survives
-    // restarts via reviews.json).
+    // restarts via reviews.json), and auto-dismiss it: a posted comment is
+    // handled, so it should no longer count toward ranking.
     c.posted = { at: new Date().toISOString(), url: created.html_url || null };
+    c.dismissed = true;
     persistReviews();
     log(`posted inline comment on ${key} (${c.file}:${c.line})`);
     return res.json({ status: "posted", url: c.posted.url, at: c.posted.at });
